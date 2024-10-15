@@ -1,0 +1,12 @@
+bin/
+obj/
+.vscode/
+*.user
+*.suo
+*.log
+.vs/
+appsettings.Development.json
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfvars
