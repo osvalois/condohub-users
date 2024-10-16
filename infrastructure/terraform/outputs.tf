@@ -30,3 +30,14 @@ output "app_insights_instrumentation_key" {
   value     = azurerm_application_insights.app_insights.instrumentation_key
   sensitive = true
 }
+output "apim_gateway_url" {
+  value = azurerm_api_management.apim.gateway_url
+}
+
+output "acr_login_server" {
+  value = azurerm_container_registry.acr.login_server
+}
+
+output "log_analytics_workspace_id" {
+  value = azurerm_log_analytics_workspace.law.id
+}

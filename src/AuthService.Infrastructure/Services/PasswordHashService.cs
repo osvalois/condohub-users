@@ -1,4 +1,4 @@
-using AuthService.Infrastructure.Interfaces;
+using AuthService.Domain.Interfaces;
 using BC = BCrypt.Net.BCrypt;
 
 namespace AuthService.Infrastructure.Services

@@ -3,7 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using AuthService.Application.Auth.Commands;
 using AuthService.Domain.Interfaces;
-using AuthService.Infrastructure.Interfaces;
+using AuthService.Domain.Interfaces;
 using MediatR;
 
 namespace AuthService.Application.Auth.Handlers
