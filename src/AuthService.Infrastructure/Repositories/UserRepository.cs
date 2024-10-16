@@ -13,21 +13,27 @@ namespace AuthService.Infrastructure.Repositories
 
         public UserRepository(AuthDbContext context)
         {
-            _context = context;
+            _context = context ?? throw new ArgumentNullException(nameof(context));
         }
 
-        public async Task<User> GetByIdAsync(Guid id)
+        public async Task<User?> GetByIdAsync(Guid id)
         {
             return await _context.Users.FindAsync(id);
         }
 
-        public async Task<User> GetByEmailAsync(string email)
+        public async Task<User?> GetByEmailAsync(string email)
         {
+            if (string.IsNullOrEmpty(email))
+                throw new ArgumentException("Email cannot be null or empty", nameof(email));
+
             return await _context.Users.FirstOrDefaultAsync(u => u.Email == email);
         }
 
         public async Task<User> AddAsync(User user)
         {
+            if (user == null)
+                throw new ArgumentNullException(nameof(user));
+
             await _context.Users.AddAsync(user);
             await _context.SaveChangesAsync();
             return user;
@@ -35,6 +41,9 @@ namespace AuthService.Infrastructure.Repositories
 
         public async Task UpdateAsync(User user)
         {
+            if (user == null)
+                throw new ArgumentNullException(nameof(user));
+
             _context.Entry(user).State = EntityState.Modified;
             await _context.SaveChangesAsync();
         }

@@ -16,11 +16,7 @@ namespace AuthService.Domain.Interfaces
     public interface IEmailService
     {
         Task SendPasswordRecoveryEmailAsync(string email, string token);
-    }
+        Task SendWelcomeEmailAsync(string email, string name);
 
-    public interface ITokenBlacklistService
-    {
-        Task BlacklistTokenForUserAsync(Guid userId);
-        Task<bool> IsTokenBlacklistedAsync(string token);
     }
 }

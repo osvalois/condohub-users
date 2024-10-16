@@ -15,15 +15,30 @@ namespace AuthService.Infrastructure.Services
 
         public JwtService(IConfiguration configuration)
         {
-            _configuration = configuration;
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         }
 
         public string GenerateToken(User user)
         {
+            if (user == null)
+                throw new ArgumentNullException(nameof(user));
+
             var secret = _configuration["Jwt:Secret"];
             var issuer = _configuration["Jwt:Issuer"];
             var audience = _configuration["Jwt:Audience"];
-            var expirationInMinutes = Convert.ToInt32(_configuration["Jwt:ExpirationInMinutes"]);
+            var expirationInMinutesString = _configuration["Jwt:ExpirationInMinutes"];
+
+            if (string.IsNullOrEmpty(secret))
+                throw new InvalidOperationException("JWT Secret is not configured.");
+            if (string.IsNullOrEmpty(issuer))
+                throw new InvalidOperationException("JWT Issuer is not configured.");
+            if (string.IsNullOrEmpty(audience))
+                throw new InvalidOperationException("JWT Audience is not configured.");
+            if (string.IsNullOrEmpty(expirationInMinutesString))
+                throw new InvalidOperationException("JWT ExpirationInMinutes is not configured.");
+
+            if (!int.TryParse(expirationInMinutesString, out int expirationInMinutes))
+                throw new InvalidOperationException("JWT ExpirationInMinutes is not a valid integer.");
 
             var securityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secret));
             var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);

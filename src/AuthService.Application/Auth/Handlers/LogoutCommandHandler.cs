@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AuthService.Application.Auth.Commands;
@@ -12,13 +13,22 @@ namespace AuthService.Application.Auth.Handlers
 
         public LogoutCommandHandler(ITokenBlacklistService tokenBlacklistService)
         {
-            _tokenBlacklistService = tokenBlacklistService;
+            _tokenBlacklistService = tokenBlacklistService ?? throw new ArgumentNullException(nameof(tokenBlacklistService));
         }
 
         public async Task<bool> Handle(LogoutCommand request, CancellationToken cancellationToken)
         {
-            // Aquí podrías invalidar el token actual
-            await _tokenBlacklistService.BlacklistTokenForUserAsync(request.UserId);
+            if (request == null)
+                throw new ArgumentNullException(nameof(request));
+
+            if (request.UserId == Guid.Empty)
+                throw new ArgumentException("Invalid user ID", nameof(request));
+
+            if (string.IsNullOrEmpty(request.Token))
+                throw new ArgumentException("Token cannot be null or empty", nameof(request));
+
+            // Blacklist the token
+            await _tokenBlacklistService.BlacklistTokenForUserAsync(request.UserId, request.Token);
             return true;
         }
     }

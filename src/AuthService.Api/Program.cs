@@ -1,7 +1,7 @@
 using AuthService.Application.Auth.Commands;
-using AuthService.Domain.Interfaces;
 using AuthService.Infrastructure.Persistence;
 using AuthService.Infrastructure.Repositories;
+using AuthService.Domain.Interfaces;
 using AuthService.Infrastructure.Services;
 using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -12,6 +12,9 @@ using System.Text;
 using Serilog;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.FeatureManagement;
+using Azure.Identity;
+using Microsoft.Extensions.Configuration.AzureAppConfiguration;
+using System.Reflection;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,25 +23,92 @@ Log.Logger = new LoggerConfiguration()
     .ReadFrom.Configuration(builder.Configuration)
     .Enrich.FromLogContext()
     .WriteTo.Console()
-    .WriteTo.ApplicationInsights(new TelemetryConfiguration { InstrumentationKey = builder.Configuration["ApplicationInsights:InstrumentationKey"] }, TelemetryConverter.Traces)
+    .WriteTo.ApplicationInsights(TelemetryConfiguration.CreateDefault(), TelemetryConverter.Traces)
     .CreateLogger();
 
 builder.Host.UseSerilog();
 
+// Load configuration from Azure App Configuration
+try
+{
+    string appConfigConnectionString = builder.Configuration["AzureAppConfiguration:ConnectionString"] ?? string.Empty;
+    if (!string.IsNullOrEmpty(appConfigConnectionString))
+    {
+        builder.Configuration.AddAzureAppConfiguration(options =>
+        {
+            options.Connect(appConfigConnectionString)
+                   .UseFeatureFlags()
+                   .ConfigureKeyVault(kv =>
+                   {
+                       kv.SetCredential(new DefaultAzureCredential(new DefaultAzureCredentialOptions
+                       {
+                           ExcludeEnvironmentCredential = true,
+                           ExcludeManagedIdentityCredential = true,
+                           ExcludeSharedTokenCacheCredential = true,
+                           ExcludeVisualStudioCredential = true,
+                           ExcludeVisualStudioCodeCredential = true,
+                           ExcludeAzureCliCredential = false,
+                           ExcludeInteractiveBrowserCredential = true
+                       }));
+                   });
+        });
+    }
+    else
+    {
+        Log.Warning("Azure App Configuration connection string is not provided. Skipping Azure App Configuration setup.");
+    }
+}
+catch (Exception ex)
+{
+    Log.Error(ex, "An error occurred while configuring Azure App Configuration.");
+}
+
 // Add services to the container.
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
+
+// Configure Swagger/OpenAPI
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new OpenApiInfo { Title = "Auth Service API", Version = "v1" });
+    c.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "Auth Service API",
+        Version = "v1",
+        Description = "API for user authentication and authorization",
+        Contact = new OpenApiContact
+        {
+            Name = "API Support",
+            Email = "support@example.com",
+            Url = new Uri("https://www.example.com/support")
+        },
+        License = new OpenApiLicense
+        {
+            Name = "Apache 2.0",
+            Url = new Uri("https://www.apache.org/licenses/LICENSE-2.0.html")
+        }
+    });
+
+    // Set the comments path for the Swagger JSON and UI.
+    var xmlFile = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    if (File.Exists(xmlPath))
+    {
+        c.IncludeXmlComments(xmlPath);
+    }
+    else
+    {
+        Log.Warning("XML documentation file not found. Swagger comments will not be included.");
+    }
+
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme.",
+        Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token in the text input below.",
         Name = "Authorization",
         In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer"
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "Bearer"
     });
+
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
@@ -50,7 +120,7 @@ builder.Services.AddSwaggerGen(c =>
                     Id = "Bearer"
                 }
             },
-            Array.Empty<string>()
+            new string[] {}
         }
     });
 });
@@ -67,8 +137,16 @@ builder.Services.AddScoped<IJwtService, JwtService>();
 builder.Services.AddScoped<IPasswordHashService, PasswordHashService>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+builder.Services.AddScoped<ITokenBlacklistService, TokenBlacklistService>();
 
 // Configure JWT authentication
+var jwtSecret = builder.Configuration["JWT:Secret"];
+if (string.IsNullOrEmpty(jwtSecret))
+{
+    Log.Error("JWT:Secret is not configured.");
+    throw new InvalidOperationException("JWT:Secret is not configured.");
+}
+
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -78,9 +156,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidAudience = builder.Configuration["Jwt:Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Secret"]))
+            ValidIssuer = builder.Configuration["JWT:Issuer"],
+            ValidAudience = builder.Configuration["JWT:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret))
         };
     });
 
@@ -88,13 +166,9 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddFeatureManagement();
 
 // Add Application Insights
-builder.Services.AddApplicationInsightsTelemetry(builder.Configuration["ApplicationInsights:ConnectionString"]);
-
-// Add Azure App Configuration
-builder.Configuration.AddAzureAppConfiguration(options =>
+builder.Services.AddApplicationInsightsTelemetry(options =>
 {
-    options.Connect(builder.Configuration["AppConfig:ConnectionString"])
-           .UseFeatureFlags();
+    options.ConnectionString = builder.Configuration["ApplicationInsights:ConnectionString"];
 });
 
 var app = builder.Build();
@@ -103,7 +177,11 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(c =>
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Auth Service API v1");
+        c.RoutePrefix = string.Empty; // To serve the Swagger UI at the app's root
+    });
 }
 else
 {
