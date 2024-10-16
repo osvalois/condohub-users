@@ -1,121 +1,57 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Identity.Web;
-using Microsoft.Graph;
-using Azure.Identity;
-using System.Security.Claims;
+using MediatR;
+using AuthService.Application.Auth.Commands;
+using AuthService.Application.Auth.Queries;
 
 namespace AuthService.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
-    [Authorize]
+    [Route("api")]
     public class AuthController : ControllerBase
     {
-        private readonly GraphServiceClient _graphServiceClient;
-        private readonly IConfiguration _configuration;
+        private readonly IMediator _mediator;
 
-        public AuthController(IConfiguration configuration)
+        public AuthController(IMediator mediator)
         {
-            _configuration = configuration;
-            var scopes = new[] { "https://graph.microsoft.com/.default" };
-            var clientSecretCredential = new ClientSecretCredential(
-                _configuration["AzureAd:TenantId"],
-                _configuration["AzureAd:ClientId"],
-                _configuration["AzureAd:ClientSecret"]);
-            _graphServiceClient = new GraphServiceClient(clientSecretCredential, scopes);
+            _mediator = mediator;
         }
 
-        [HttpGet("me")]
-        public async Task<IActionResult> GetMe()
+        [HttpPost("token")]
+        public async Task<IActionResult> Login([FromBody] LoginQuery query)
         {
-            var user = await _graphServiceClient.Me.Request().GetAsync();
-            return Ok(new
-            {
-                user.DisplayName,
-                user.UserPrincipalName,
-                user.Id
-            });
+            var result = await _mediator.Send(query);
+            return Ok(result);
         }
 
-        [AllowAnonymous]
-        [HttpPost("signup")]
-        public async Task<IActionResult> SignUp([FromBody] SignUpModel model)
-        {
-            var user = new User
-            {
-                AccountEnabled = true,
-                DisplayName = $"{model.FirstName} {model.LastName}",
-                MailNickname = model.Email.Split('@')[0],
-                UserPrincipalName = model.Email,
-                PasswordProfile = new PasswordProfile
-                {
-                    ForceChangePasswordNextSignIn = true,
-                    Password = model.Password
-                }
-            };
-
-            try
-            {
-                await _graphServiceClient.Users.Request().AddAsync(user);
-                return Ok(new { message = "User created successfully" });
-            }
-            catch (ServiceException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
-        }
-
+        [Authorize]
         [HttpPost("logout")]
-        public IActionResult Logout()
+        public async Task<IActionResult> Logout()
         {
-            // Azure AD handles token revocation, so we don't need to do anything here
+            var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId == null)
+            {
+                return Unauthorized();
+            }
+
+            var command = new LogoutCommand { UserId = Guid.Parse(userId) };
+            var result = await _mediator.Send(command);
             return Ok(new { message = "Logout successful" });
         }
 
-        [AllowAnonymous]
+        [HttpPost("signup")]
+        public async Task<IActionResult> SignUp([FromBody] SignUpCommand command)
+        {
+            var result = await _mediator.Send(command);
+            return Ok(result);
+        }
+
         [HttpPost("recover")]
-        public async Task<IActionResult> RecoverPassword([FromBody] RecoverPasswordModel model)
+        public async Task<IActionResult> RecoverPassword([FromBody] RecoverPasswordCommand command)
         {
-            try
-            {
-                var user = await _graphServiceClient.Users[model.Email].Request().GetAsync();
-                await _graphServiceClient.Users[user.Id].Request()
-                    .UpdateAsync(new User
-                    {
-                        PasswordProfile = new PasswordProfile
-                        {
-                            ForceChangePasswordNextSignIn = true,
-                            Password = GenerateRandomPassword()
-                        }
-                    });
-
-                // Here you would typically send an email with the new password
-                return Ok(new { message = "Password reset. Check your email for the new password." });
-            }
-            catch (ServiceException ex)
-            {
-                return BadRequest(new { message = ex.Message });
-            }
+            var result = await _mediator.Send(command);
+            return Ok(new { message = "If the email exists, a password recovery link has been sent." });
         }
-
-        private string GenerateRandomPassword()
-        {
-            // Implement a secure random password generation method
-            return Guid.NewGuid().ToString("N").Substring(0, 12) + "!A1";
-        }
-    }
-
-    public class SignUpModel
-    {
-        public string FirstName { get; set; }
-        public string LastName { get; set; }
-        public string Email { get; set; }
-        public string Password { get; set; }
-    }
-
-    public class RecoverPasswordModel
-    {
-        public string Email { get; set; }
     }
 }

@@ -2,7 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AuthService.Application.Auth.Queries;
-using AuthService.Infrastructure.Interfaces;
+using AuthService.Domain.Interfaces;
 using MediatR;
 
 namespace AuthService.Application.Auth.Handlers

@@ -3,13 +3,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using AuthService.Application.Auth.Commands;
 using AuthService.Domain.Entities;
-using AuthService.Infrastructure.Interfaces;
+using AuthService.Domain.Interfaces;
 using MediatR;
 
 namespace AuthService.Application.Auth.Handlers
 {
     public class SignUpCommandHandler : IRequestHandler<SignUpCommand, AuthResult>
-    {
+    {        
         private readonly IUserRepository _userRepository;
         private readonly IPasswordHashService _passwordHashService;
         private readonly IJwtService _jwtService;
@@ -20,7 +20,6 @@ namespace AuthService.Application.Auth.Handlers
             _passwordHashService = passwordHashService;
             _jwtService = jwtService;
         }
-
         public async Task<AuthResult> Handle(SignUpCommand request, CancellationToken cancellationToken)
         {
             var existingUser = await _userRepository.GetByEmailAsync(request.Email);
