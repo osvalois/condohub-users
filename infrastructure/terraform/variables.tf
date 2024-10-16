@@ -58,3 +58,28 @@ variable "app_insights_name" {
   description = "The name of the Application Insights resource"
   type        = string
 }
+
+variable "apim_name" {
+  description = "The name of the API Management service"
+  type        = string
+}
+
+variable "publisher_name" {
+  description = "The name of the API publisher"
+  type        = string
+}
+
+variable "publisher_email" {
+  description = "The email of the API publisher"
+  type        = string
+}
+
+variable "acr_name" {
+  description = "The name of the Azure Container Registry"
+  type        = string
+}
+
+variable "log_analytics_workspace_name" {
+  description = "The name of the Log Analytics Workspace"
+  type        = string
+}

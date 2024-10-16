@@ -1,0 +1,79 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  DOTNET_VERSION: '8.0.x'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --no-restore
+
+    - name: Run tests
+      run: dotnet test --no-build --verbosity normal
+
+    - name: Run code coverage
+      run: dotnet test --no-build /p:CollectCoverage=true /p:CoverletOutputFormat=opencover
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Run dotnet format
+      run: dotnet format --verify-no-changes
+
+    - name: Lint Terraform
+      uses: actionshub/terraform-lint@main
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Run Snyk to check for vulnerabilities
+      uses: snyk/actions/dotnet@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+  push-to-azure-devops:
+    needs: [build-and-test, lint, security-scan]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Azure Repo Sync
+      uses: azure/dev-spaces/actions/azure-repo-sync@v1
+      with:
+        azure-devops-project-url: 'https://dev.azure.com/${{ secrets.AZURE_DEVOPS_ORGANIZATION }}/${{ secrets.AZURE_DEVOPS_PROJECT }}'
+        azure-repo-name: '${{ secrets.AZURE_REPO_NAME }}'
+      env:
+        AZURE_DEVOPS_TOKEN: ${{ secrets.AZURE_DEVOPS_TOKEN }}
+
+    - name: Trigger Azure DevOps Pipeline
+      uses: Azure/pipelines@v1
+      with:
+        azure-devops-project-url: 'https://dev.azure.com/${{ secrets.AZURE_DEVOPS_ORGANIZATION }}/${{ secrets.AZURE_DEVOPS_PROJECT }}'
+        azure-pipeline-name: '${{ secrets.AZURE_PIPELINE_NAME }}'
+        azure-devops-token: ${{ secrets.AZURE_DEVOPS_TOKEN }}
