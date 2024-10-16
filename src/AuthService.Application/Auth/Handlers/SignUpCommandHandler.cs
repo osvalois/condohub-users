@@ -9,7 +9,7 @@ using MediatR;
 namespace AuthService.Application.Auth.Handlers
 {
     public class SignUpCommandHandler : IRequestHandler<SignUpCommand, AuthResult>
-    {        
+    {
         private readonly IUserRepository _userRepository;
         private readonly IPasswordHashService _passwordHashService;
         private readonly IJwtService _jwtService;

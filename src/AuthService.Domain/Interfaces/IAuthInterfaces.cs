@@ -2,7 +2,7 @@ using AuthService.Domain.Entities;
 
 namespace AuthService.Domain.Interfaces
 {
- public interface IPasswordHashService
+    public interface IPasswordHashService
     {
         string HashPassword(string password);
         bool VerifyPassword(string password, string hashedPassword);
