@@ -71,7 +71,7 @@ jobs:
       uses: actionshub/terraform-lint@main
 
   push-to-azure-devops:
-    needs: [build-and-test, snyk, lint]
+    needs: [build-and-test, lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
