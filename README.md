@@ -6,6 +6,7 @@
 ![GitHub issues](https://img.shields.io/github/issues/osvalois/condohub-auth-service)
 ![GitHub pull requests](https://img.shields.io/github/issues-pr/osvalois/condohub-auth-service)
 ![License](https://img.shields.io/github/license/osvalois/condohub-auth-service)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=osvalois_condohub-auth-service&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=osvalois_condohub-auth-service)
 
 A robust authentication microservice for CondoHub, built with .NET 8 and Azure AD integration.
 </div>
