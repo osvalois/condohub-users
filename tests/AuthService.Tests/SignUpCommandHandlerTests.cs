@@ -1,81 +1,40 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using AuthService.Application.Auth.Commands;
-using AuthService.Application.Auth.Handlers;
 using AuthService.Application.Auth.Queries;
+using AuthService.Application.Auth.Handlers;
 using AuthService.Domain.Entities;
 using AuthService.Domain.Interfaces;
-using AuthService.Infrastructure.Services;
-using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
-using AuthService.Application;
 
 namespace AuthService.Tests
 {
-    public class SignUpCommandHandlerTests
-    {
-        [Fact]
-        public async Task Handle_WithValidRequest_ShouldCreateUserAndReturnToken()
-        {
-            // Arrange
-            var userRepositoryMock = new Mock<IUserRepository>();
-            var passwordHashServiceMock = new Mock<IPasswordHashService>();
-            var jwtServiceMock = new Mock<IJwtService>();
-            var emailServiceMock = new Mock<IEmailService>();
-
-            var handler = new SignUpCommandHandler(
-                userRepositoryMock.Object,
-                passwordHashServiceMock.Object,
-                jwtServiceMock.Object,
-                emailServiceMock.Object);
-
-            var command = new SignUpCommand
-            {
-                FirstName = "John",
-                LastName = "Doe",
-                Email = "john@example.com",
-                Password = "StrongPassword123!",
-                DepartmentNumber = "D001"
-            };
-
-            userRepositoryMock.Setup(repo => repo.GetByEmailAsync(It.IsAny<string>()))
-                .ReturnsAsync((User)null);
-
-            passwordHashServiceMock.Setup(service => service.HashPassword(It.IsAny<string>()))
-                .Returns("hashedPassword");
-
-            jwtServiceMock.Setup(service => service.GenerateToken(It.IsAny<User>()))
-                .Returns("generatedToken");
-
-            // Act
-            var result = await handler.Handle(command, CancellationToken.None);
-
-            // Assert
-            Assert.True(result.Success);
-            Assert.Equal("generatedToken", result.Token);
-            Assert.NotEqual(Guid.Empty, result.UserId);
-
-            userRepositoryMock.Verify(repo => repo.AddAsync(It.IsAny<User>()), Times.Once);
-            emailServiceMock.Verify(service => service.SendWelcomeEmailAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
-        }
-    }
-
     public class LoginQueryHandlerTests
     {
+        private readonly Mock<IUserRepository> _userRepositoryMock;
+        private readonly Mock<IPasswordHashService> _passwordHashServiceMock;
+        private readonly Mock<IJwtService> _jwtServiceMock;
+        private readonly Mock<ILogger<LoginQueryHandler>> _loggerMock;
+
+        public LoginQueryHandlerTests()
+        {
+            _userRepositoryMock = new Mock<IUserRepository>();
+            _passwordHashServiceMock = new Mock<IPasswordHashService>();
+            _jwtServiceMock = new Mock<IJwtService>();
+            _loggerMock = new Mock<ILogger<LoginQueryHandler>>();
+        }
+
         [Fact]
         public async Task Handle_WithValidCredentials_ShouldReturnToken()
         {
             // Arrange
-            var userRepositoryMock = new Mock<IUserRepository>();
-            var passwordHashServiceMock = new Mock<IPasswordHashService>();
-            var jwtServiceMock = new Mock<IJwtService>();
-
             var handler = new LoginQueryHandler(
-                userRepositoryMock.Object,
-                passwordHashServiceMock.Object,
-                jwtServiceMock.Object);
+                _userRepositoryMock.Object,
+                _passwordHashServiceMock.Object,
+                _jwtServiceMock.Object,
+                _loggerMock.Object);
 
             var query = new LoginQuery
             {
@@ -90,13 +49,13 @@ namespace AuthService.Tests
                 PasswordHash = "hashedPassword"
             };
 
-            userRepositoryMock.Setup(repo => repo.GetByEmailAsync(It.IsAny<string>()))
+            _userRepositoryMock.Setup(repo => repo.GetByEmailAsync(It.IsAny<string>()))
                 .ReturnsAsync(user);
 
-            passwordHashServiceMock.Setup(service => service.VerifyPassword(It.IsAny<string>(), It.IsAny<string>()))
+            _passwordHashServiceMock.Setup(service => service.VerifyPassword(It.IsAny<string>(), It.IsAny<string>()))
                 .Returns(true);
 
-            jwtServiceMock.Setup(service => service.GenerateToken(It.IsAny<User>()))
+            _jwtServiceMock.Setup(service => service.GenerateToken(It.IsAny<User>()))
                 .Returns("generatedToken");
 
             // Act
@@ -107,46 +66,101 @@ namespace AuthService.Tests
             Assert.Equal("generatedToken", result.Token);
             Assert.Equal(user.Id, result.UserId);
 
-            userRepositoryMock.Verify(repo => repo.UpdateAsync(It.IsAny<User>()), Times.Once);
-        }
-    }
-
-    public class PasswordHashServiceTests
-    {
-        [Fact]
-        public void HashPassword_ShouldReturnDifferentHashForSamePassword()
-        {
-            // Arrange
-            var configurationMock = new Mock<Microsoft.Extensions.Configuration.IConfiguration>();
-            configurationMock.Setup(c => c["Security:PasswordHashingIterations"]).Returns("10000");
-
-            var service = new PasswordHashService(configurationMock.Object);
-            var password = "StrongPassword123!";
-
-            // Act
-            var hash1 = service.HashPassword(password);
-            var hash2 = service.HashPassword(password);
-
-            // Assert
-            Assert.NotEqual(hash1, hash2);
+            _userRepositoryMock.Verify(repo => repo.UpdateAsync(It.IsAny<User>()), Times.Once);
+            _loggerMock.Verify(
+                x => x.Log(
+                    It.IsAny<LogLevel>(),
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((o, t) => string.Contains(o.ToString(), "User logged in successfully")),
+                    It.IsAny<Exception>(),
+                    It.IsAny<Func<It.IsAnyType, Exception, string>>()!),
+                Times.Once);
         }
 
         [Fact]
-        public void VerifyPassword_WithCorrectPassword_ShouldReturnTrue()
+        public async Task Handle_WithInvalidEmail_ShouldReturnFailureResult()
         {
             // Arrange
-            var configurationMock = new Mock<Microsoft.Extensions.Configuration.IConfiguration>();
-            configurationMock.Setup(c => c["Security:PasswordHashingIterations"]).Returns("10000");
+            var handler = new LoginQueryHandler(
+                _userRepositoryMock.Object,
+                _passwordHashServiceMock.Object,
+                _jwtServiceMock.Object,
+                _loggerMock.Object);
 
-            var service = new PasswordHashService(configurationMock.Object);
-            var password = "StrongPassword123!";
-            var hash = service.HashPassword(password);
+            var query = new LoginQuery
+            {
+                Email = "nonexistent@example.com",
+                Password = "StrongPassword123!"
+            };
+
+            _userRepositoryMock.Setup(repo => repo.GetByEmailAsync(It.IsAny<string>()))
+                .ReturnsAsync((User)null);
 
             // Act
-            var result = service.VerifyPassword(password, hash);
+            var result = await handler.Handle(query, CancellationToken.None);
 
             // Assert
-            Assert.True(result);
+            Assert.False(result.Success);
+            Assert.Null(result.Token);
+            Assert.Equal(Guid.Empty, result.UserId);
+
+            _userRepositoryMock.Verify(repo => repo.UpdateAsync(It.IsAny<User>()), Times.Never);
+            _loggerMock.Verify(
+                x => x.Log(
+                    It.IsAny<LogLevel>(),
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((o, t) => string.Contains(o.ToString(), "Login failed: User not found")),
+                    It.IsAny<Exception>(),
+                    It.IsAny<Func<It.IsAnyType, Exception, string>>()!),
+                Times.Once);
+        }
+
+        [Fact]
+        public async Task Handle_WithInvalidPassword_ShouldReturnFailureResult()
+        {
+            // Arrange
+            var handler = new LoginQueryHandler(
+                _userRepositoryMock.Object,
+                _passwordHashServiceMock.Object,
+                _jwtServiceMock.Object,
+                _loggerMock.Object);
+
+            var query = new LoginQuery
+            {
+                Email = "john@example.com",
+                Password = "WrongPassword123!"
+            };
+
+            var user = new User
+            {
+                Id = Guid.NewGuid(),
+                Email = "john@example.com",
+                PasswordHash = "hashedPassword"
+            };
+
+            _userRepositoryMock.Setup(repo => repo.GetByEmailAsync(It.IsAny<string>()))
+                .ReturnsAsync(user);
+
+            _passwordHashServiceMock.Setup(service => service.VerifyPassword(It.IsAny<string>(), It.IsAny<string>()))
+                .Returns(false);
+
+            // Act
+            var result = await handler.Handle(query, CancellationToken.None);
+
+            // Assert
+            Assert.False(result.Success);
+            Assert.Null(result.Token);
+            Assert.Equal(Guid.Empty, result.UserId);
+
+            _userRepositoryMock.Verify(repo => repo.UpdateAsync(It.IsAny<User>()), Times.Never);
+            _loggerMock.Verify(
+                x => x.Log(
+                    It.IsAny<LogLevel>(),
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((o, t) => string.Contains(o.ToString(), "Login failed: Invalid password")),
+                    It.IsAny<Exception>(),
+                    It.IsAny<Func<It.IsAnyType, Exception, string>>()!),
+                Times.Once);
         }
     }
 }

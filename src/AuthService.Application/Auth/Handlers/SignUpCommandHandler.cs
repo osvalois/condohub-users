@@ -33,20 +33,23 @@ namespace AuthService.Application.Auth.Handlers
 
         public async Task<AuthResult> Handle(SignUpCommand request, CancellationToken cancellationToken)
         {
+            _logger.LogInformation("Processing sign-up request for email: {Email}", request.Email);
+
             try
             {
                 // Validate input
                 if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
                 {
-                    return new AuthResult { Success = false, Message = "Email and password are required." };
+                    _logger.LogWarning("Sign-up attempt with empty email or password");
+                    return AuthResult.FailureResult("Email and password are required.");
                 }
 
                 // Check if user already exists
                 var existingUser = await _userRepository.GetByEmailAsync(request.Email);
                 if (existingUser != null)
                 {
-                    _logger.LogWarning($"Attempted to create an account with existing email: {request.Email}");
-                    return new AuthResult { Success = false, Message = "User with this email already exists." };
+                    _logger.LogWarning("Attempted to create an account with existing email: {Email}", request.Email);
+                    return AuthResult.FailureResult("User with this email already exists.");
                 }
 
                 // Create new user
@@ -55,7 +58,7 @@ namespace AuthService.Application.Auth.Handlers
 
                 // Save user to database
                 await _userRepository.AddAsync(newUser);
-                _logger.LogInformation($"New user created: {newUser.Id}");
+                _logger.LogInformation("New user created: {UserId}", newUser.Id);
 
                 // Generate JWT token
                 var token = _jwtService.GenerateToken(newUser);
@@ -64,30 +67,20 @@ namespace AuthService.Application.Auth.Handlers
                 try
                 {
                     await _emailService.SendWelcomeEmailAsync(newUser.Email, newUser.FirstName);
-                    _logger.LogInformation($"Welcome email sent to: {newUser.Email}");
+                    _logger.LogInformation("Welcome email sent to: {Email}", newUser.Email);
                 }
                 catch (Exception ex)
                 {
                     // Log the error but don't fail the sign-up process
-                    _logger.LogError(ex, $"Failed to send welcome email to: {newUser.Email}");
+                    _logger.LogError(ex, "Failed to send welcome email to: {Email}", newUser.Email);
                 }
 
-                return new AuthResult
-                {
-                    Success = true,
-                    Token = token,
-                    UserId = newUser.Id,
-                    Message = "User successfully created."
-                };
+                return AuthResult.SuccessResultWithMessage(token, newUser.Id, "User successfully created.");
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "An error occurred during user sign-up");
-                return new AuthResult
-                {
-                    Success = false,
-                    Message = "An unexpected error occurred. Please try again later."
-                };
+                _logger.LogError(ex, "An error occurred during user sign-up for email: {Email}", request.Email);
+                return AuthResult.FailureResult("An unexpected error occurred. Please try again later.");
             }
         }
     }
