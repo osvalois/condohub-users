@@ -6,19 +6,20 @@ using System.Threading.Tasks;
 using AuthService.Api;
 using AuthService.Application.Auth.Commands;
 using AuthService.Application.Auth.Queries;
+using AuthService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Xunit;
-using AuthService.Infrastructure.Persistence;
-using AuthService.Application;
-
 
 namespace AuthService.Tests.E2E
 {
-    public class AuthServiceE2ETests : IClassFixture<WebApplicationFactory<Program>>
+    public class AuthServiceE2ETests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
     {
         private readonly WebApplicationFactory<Program> _factory;
+        private readonly IServiceScope _scope;
+        private readonly AuthDbContext _dbContext;
 
         public AuthServiceE2ETests(WebApplicationFactory<Program> factory)
         {
@@ -28,8 +29,7 @@ namespace AuthService.Tests.E2E
                 {
                     // Remove the app's ApplicationDbContext registration.
                     var descriptor = services.SingleOrDefault(
-                        d => d.ServiceType ==
-                            typeof(DbContextOptions<AuthDbContext>));
+                        d => d.ServiceType == typeof(DbContextOptions<AuthDbContext>));
 
                     if (descriptor != null)
                     {
@@ -42,20 +42,31 @@ namespace AuthService.Tests.E2E
                         options.UseInMemoryDatabase("InMemoryDbForTesting");
                     });
 
-                    // Build the service provider.
-                    var sp = services.BuildServiceProvider();
+                    // Ensure all other necessary services are registered
+                    // This might include your handlers, repositories, etc.
+                    // services.AddScoped<IUserRepository, UserRepository>();
+                    // services.AddScoped<IJwtService, JwtService>();
+                    // ... other services
 
-                    // Create a scope to obtain a reference to the database context
-                    using (var scope = sp.CreateScope())
-                    {
-                        var scopedServices = scope.ServiceProvider;
-                        var db = scopedServices.GetRequiredService<AuthDbContext>();
+                    // Replace other services with test doubles if necessary
+                    // services.AddSingleton<IEmailService, FakeEmailService>();
+                });
 
-                        // Ensure the database is created.
-                        db.Database.EnsureCreated();
-                    }
+                builder.ConfigureLogging(logging =>
+                {
+                    logging.ClearProviders();
+                    logging.AddXUnit(); // Assuming you're using the XUnit logger
                 });
             });
+
+            _scope = _factory.Services.CreateScope();
+            _dbContext = _scope.ServiceProvider.GetRequiredService<AuthDbContext>();
+        }
+
+        public void Dispose()
+        {
+            _dbContext.Database.EnsureDeleted();
+            _scope.Dispose();
         }
 
         [Fact]
@@ -107,13 +118,76 @@ namespace AuthService.Tests.E2E
             // Assert - Access Protected Resource
             Assert.Equal(HttpStatusCode.OK, protectedResponse.StatusCode);
         }
+
+        [Fact]
+        public async Task SignUp_WithExistingEmail_ShouldFail()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var existingUser = new SignUpCommand
+            {
+                FirstName = "Existing",
+                LastName = "User",
+                Email = "existing@example.com",
+                Password = "ExistingPassword123!",
+                DepartmentNumber = "D002"
+            };
+
+            // Act - Register existing user
+            await client.PostAsJsonAsync("/api/auth/signup", existingUser);
+
+            // Act - Try to register with the same email
+            var signUpResponse = await client.PostAsJsonAsync("/api/auth/signup", existingUser);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, signUpResponse.StatusCode);
+            var result = await signUpResponse.Content.ReadFromJsonAsync<AuthResult>();
+            Assert.NotNull(result);
+            Assert.False(result.Success);
+            Assert.Contains("already exists", result.Message);
+        }
+
+        [Fact]
+        public async Task Login_WithInvalidCredentials_ShouldFail()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var loginQuery = new LoginQuery
+            {
+                Email = "nonexistent@example.com",
+                Password = "WrongPassword123!"
+            };
+
+            // Act
+            var loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginQuery);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, loginResponse.StatusCode);
+            var result = await loginResponse.Content.ReadFromJsonAsync<AuthResult>();
+            Assert.NotNull(result);
+            Assert.False(result.Success);
+            Assert.Contains("Invalid", result.Message);
+        }
+
+        [Fact]
+        public async Task AccessProtectedResource_WithoutToken_ShouldFail()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+
+            // Act
+            var protectedResponse = await client.GetAsync("/api/protected");
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, protectedResponse.StatusCode);
+        }
     }
 
-    // You might need to create this class if it doesn't exist in your actual code
     public class AuthResult
     {
         public bool Success { get; set; }
         public string Token { get; set; }
         public Guid UserId { get; set; }
+        public string Message { get; set; }
     }
 }

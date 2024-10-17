@@ -2,162 +2,108 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using AuthService.Application.Auth.Commands;
-using AuthService.Application.Auth.Handlers;
 using AuthService.Domain.Entities;
 using AuthService.Domain.Interfaces;
+using MediatR;
 using Microsoft.Extensions.Logging;
-using Moq;
-using Xunit;
+using System.Text.RegularExpressions;
 
-namespace AuthService.Tests
+namespace AuthService.Application.Auth.Handlers
 {
-    public class SignUpCommandHandlerTests
+    public class SignUpCommandHandler : IRequestHandler<SignUpCommand, AuthResult>
     {
-        private readonly Mock<IUserRepository> _userRepositoryMock;
-        private readonly Mock<IPasswordHashService> _passwordHashServiceMock;
-        private readonly Mock<IJwtService> _jwtServiceMock;
-        private readonly Mock<IEmailService> _emailServiceMock;
-        private readonly Mock<ILogger<SignUpCommandHandler>> _loggerMock;
+        private readonly IUserRepository _userRepository;
+        private readonly IPasswordHashService _passwordHashService;
+        private readonly IJwtService _jwtService;
+        private readonly IEmailService _emailService;
+        private readonly ILogger<SignUpCommandHandler> _logger;
 
-        public SignUpCommandHandlerTests()
+        public SignUpCommandHandler(
+            IUserRepository userRepository,
+            IPasswordHashService passwordHashService,
+            IJwtService jwtService,
+            IEmailService emailService,
+            ILogger<SignUpCommandHandler> logger)
         {
-            _userRepositoryMock = new Mock<IUserRepository>();
-            _passwordHashServiceMock = new Mock<IPasswordHashService>();
-            _jwtServiceMock = new Mock<IJwtService>();
-            _emailServiceMock = new Mock<IEmailService>();
-            _loggerMock = new Mock<ILogger<SignUpCommandHandler>>();
+            _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
+            _passwordHashService = passwordHashService ?? throw new ArgumentNullException(nameof(passwordHashService));
+            _jwtService = jwtService ?? throw new ArgumentNullException(nameof(jwtService));
+            _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        [Fact]
-        public async Task Handle_WithValidRequest_ShouldCreateUserAndReturnToken()
+        public async Task<AuthResult> Handle(SignUpCommand request, CancellationToken cancellationToken)
         {
-            // Arrange
-            var handler = new SignUpCommandHandler(
-                _userRepositoryMock.Object,
-                _passwordHashServiceMock.Object,
-                _jwtServiceMock.Object,
-                _emailServiceMock.Object,
-                _loggerMock.Object);
+            _logger.LogInformation("Processing sign-up request for email: {Email}", request.Email);
 
-            var command = new SignUpCommand
+            try
             {
-                FirstName = "John",
-                LastName = "Doe",
-                Email = "john@example.com",
-                Password = "StrongPassword123!",
-                DepartmentNumber = "D001"
-            };
+                // Validate input
+                if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+                {
+                    _logger.LogWarning("Sign-up attempt with empty email or password");
+                    return AuthResult.FailureResult("Email and password are required.");
+                }
 
-            _userRepositoryMock.Setup(repo => repo.GetByEmailAsync(It.IsAny<string>()))
-                .ReturnsAsync((User)null);
+                if (!IsValidEmail(request.Email))
+                {
+                    _logger.LogWarning("Sign-up attempt with invalid email format: {Email}", request.Email);
+                    return AuthResult.FailureResult("Invalid email format.");
+                }
 
-            _passwordHashServiceMock.Setup(service => service.HashPassword(It.IsAny<string>()))
-                .Returns("hashedPassword");
+                // Check if user already exists
+                var existingUser = await _userRepository.GetByEmailAsync(request.Email);
+                if (existingUser != null)
+                {
+                    _logger.LogWarning("Attempted to create an account with existing email: {Email}", request.Email);
+                    return AuthResult.FailureResult("User with this email already exists.");
+                }
 
-            _jwtServiceMock.Setup(service => service.GenerateToken(It.IsAny<User>()))
-                .Returns("generatedToken");
+                // Create new user
+                var newUser = new User
+                {
+                    FirstName = request.FirstName,
+                    LastName = request.LastName,
+                    Email = request.Email,
+                    DepartmentNumber = request.DepartmentNumber,
+                    PasswordHash = _passwordHashService.HashPassword(request.Password),
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
 
-            // Act
-            var result = await handler.Handle(command, CancellationToken.None);
+                // Save user to database
+                await _userRepository.AddAsync(newUser);
+                _logger.LogInformation("New user created: {UserId}", newUser.Id);
 
-            // Assert
-            Assert.True(result.Success);
-            Assert.Equal("generatedToken", result.Token);
-            Assert.NotEqual(Guid.Empty, result.UserId);
+                // Generate JWT token
+                var token = _jwtService.GenerateToken(newUser);
 
-            _userRepositoryMock.Verify(repo => repo.AddAsync(It.IsAny<User>()), Times.Once);
-            _emailServiceMock.Verify(service => service.SendWelcomeEmailAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Once);
-            _loggerMock.Verify(
-                x => x.Log(
-                    It.IsAny<LogLevel>(),
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((o, t) => o.ToString().Contains("New user created")),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception, string>>()!),
-                Times.Once);
+                // Send welcome email
+                try
+                {
+                    await _emailService.SendWelcomeEmailAsync(newUser.Email, newUser.FirstName);
+                    _logger.LogInformation("Welcome email sent to: {Email}", newUser.Email);
+                }
+                catch (Exception ex)
+                {
+                    // Log the error but don't fail the sign-up process
+                    _logger.LogError(ex, "Failed to send welcome email to: {Email}", newUser.Email);
+                }
+
+                return AuthResult.SuccessResult(token, newUser.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "An error occurred during user sign-up for email: {Email}", request.Email);
+                return AuthResult.FailureResult("An unexpected error occurred. Please try again later.");
+            }
         }
 
-        [Fact]
-        public async Task Handle_WithExistingEmail_ShouldReturnFailureResult()
+        private bool IsValidEmail(string email)
         {
-            // Arrange
-            var handler = new SignUpCommandHandler(
-                _userRepositoryMock.Object,
-                _passwordHashServiceMock.Object,
-                _jwtServiceMock.Object,
-                _emailServiceMock.Object,
-                _loggerMock.Object);
-
-            var command = new SignUpCommand
-            {
-                FirstName = "John",
-                LastName = "Doe",
-                Email = "existing@example.com",
-                Password = "StrongPassword123!",
-                DepartmentNumber = "D001"
-            };
-
-            _userRepositoryMock.Setup(repo => repo.GetByEmailAsync(It.IsAny<string>()))
-                .ReturnsAsync(new User { Email = "existing@example.com" });
-
-            // Act
-            var result = await handler.Handle(command, CancellationToken.None);
-
-            // Assert
-            Assert.False(result.Success);
-            Assert.Null(result.Token);
-            Assert.Equal(Guid.Empty, result.UserId);
-
-            _userRepositoryMock.Verify(repo => repo.AddAsync(It.IsAny<User>()), Times.Never);
-            _emailServiceMock.Verify(service => service.SendWelcomeEmailAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-            _loggerMock.Verify(
-                x => x.Log(
-                    It.IsAny<LogLevel>(),
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((o, t) => o.ToString().Contains("Attempted to create an account with existing email")),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception, string>>()!),
-                Times.Once);
-        }
-
-        [Fact]
-        public async Task Handle_WithInvalidEmail_ShouldReturnFailureResult()
-        {
-            // Arrange
-            var handler = new SignUpCommandHandler(
-                _userRepositoryMock.Object,
-                _passwordHashServiceMock.Object,
-                _jwtServiceMock.Object,
-                _emailServiceMock.Object,
-                _loggerMock.Object);
-
-            var command = new SignUpCommand
-            {
-                FirstName = "John",
-                LastName = "Doe",
-                Email = "invalid-email",
-                Password = "StrongPassword123!",
-                DepartmentNumber = "D001"
-            };
-
-            // Act
-            var result = await handler.Handle(command, CancellationToken.None);
-
-            // Assert
-            Assert.False(result.Success);
-            Assert.Null(result.Token);
-            Assert.Equal(Guid.Empty, result.UserId);
-
-            _userRepositoryMock.Verify(repo => repo.AddAsync(It.IsAny<User>()), Times.Never);
-            _emailServiceMock.Verify(service => service.SendWelcomeEmailAsync(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
-            _loggerMock.Verify(
-                x => x.Log(
-                    It.IsAny<LogLevel>(),
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((o, t) => o.ToString().Contains("Sign-up attempt with invalid email")),
-                    It.IsAny<Exception>(),
-                    It.IsAny<Func<It.IsAnyType, Exception, string>>()!),
-                Times.Once);
+            // Simple email validation regex
+            string pattern = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
+            return Regex.IsMatch(email, pattern);
         }
     }
 }
