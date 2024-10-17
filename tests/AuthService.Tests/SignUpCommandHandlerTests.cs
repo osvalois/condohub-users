@@ -59,7 +59,6 @@ namespace AuthService.Tests.E2E
             _dbContext = _scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         }
 
-        [Fact]
         public void Dispose()
         {
             _dbContext.Database.EnsureDeleted();
