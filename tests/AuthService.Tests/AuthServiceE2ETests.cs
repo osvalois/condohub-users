@@ -51,12 +51,6 @@ namespace AuthService.Tests.E2E
                     // Replace other services with test doubles if necessary
                     // services.AddSingleton<IEmailService, FakeEmailService>();
                 });
-
-                builder.ConfigureLogging(logging =>
-                {
-                    logging.ClearProviders();
-                    logging.AddXUnit(); // Assuming you're using the XUnit logger
-                });
             });
 
             _scope = _factory.Services.CreateScope();
