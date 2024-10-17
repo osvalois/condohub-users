@@ -37,7 +37,7 @@ namespace AuthService.Tests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var content = await response.Content.ReadFromJsonAsync<LoginResult>();
+            var content = await response.Content.ReadFromJsonAsync<AuthResult>();
             Assert.NotNull(content);
             Assert.NotNull(content.Token);
             Assert.NotEqual(Guid.Empty, content.UserId);
@@ -72,7 +72,7 @@ namespace AuthService.Tests
                 Password = "Password123!"
             };
             var loginResponse = await client.PostAsJsonAsync("/api/auth/token", loginQuery);
-            var loginResult = await loginResponse.Content.ReadFromJsonAsync<LoginResult>();
+            var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthResult>();
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.Token);
 
             // Act
@@ -80,8 +80,8 @@ namespace AuthService.Tests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var content = await response.Content.ReadFromJsonAsync<object>();
-            Assert.Equal("Logout successful", content.GetType().GetProperty("message").GetValue(content, null));
+            var content = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+            Assert.Equal("Logout successful", content["message"]);
         }
 
         [Fact]
@@ -115,7 +115,7 @@ namespace AuthService.Tests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var content = await response.Content.ReadFromJsonAsync<SignUpResult>();
+            var content = await response.Content.ReadFromJsonAsync<AuthResult>();
             Assert.NotNull(content);
             Assert.NotNull(content.Token);
             Assert.NotEqual(Guid.Empty, content.UserId);
@@ -156,8 +156,8 @@ namespace AuthService.Tests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var content = await response.Content.ReadFromJsonAsync<object>();
-            Assert.Equal("If the email exists, a password recovery link has been sent.", content.GetType().GetProperty("message").GetValue(content, null));
+            var content = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+            Assert.Equal("If the email exists, a password recovery link has been sent.", content["message"]);
         }
 
         [Fact]
@@ -175,8 +175,15 @@ namespace AuthService.Tests
 
             // Assert
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            var content = await response.Content.ReadFromJsonAsync<object>();
-            Assert.Equal("If the email exists, a password recovery link has been sent.", content.GetType().GetProperty("message").GetValue(content, null));
+            var content = await response.Content.ReadFromJsonAsync<Dictionary<string, string>>();
+            Assert.Equal("If the email exists, a password recovery link has been sent.", content["message"]);
         }
+    }
+
+    // Define AuthResult if it's not already defined in a accessible location
+    public class AuthResult
+    {
+        public string Token { get; set; }
+        public Guid UserId { get; set; }
     }
 }
