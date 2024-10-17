@@ -1,108 +1,181 @@
 using System;
-using System.Threading;
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Json;
 using System.Threading.Tasks;
+using AuthService.Api;
 using AuthService.Application.Auth.Commands;
-using AuthService.Domain.Entities;
-using AuthService.Domain.Interfaces;
-using MediatR;
-using Microsoft.Extensions.Logging;
-using System.Text.RegularExpressions;
+using AuthService.Application.Auth.Queries;
+using AuthService.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using Xunit;
+using FluentAssertions;
 
-namespace AuthService.Application.Auth.Handlers
+namespace AuthService.Tests.E2E
 {
-    public class SignUpCommandHandler : IRequestHandler<SignUpCommand, AuthResult>
+    public class AuthServiceE2ETests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
     {
-        private readonly IUserRepository _userRepository;
-        private readonly IPasswordHashService _passwordHashService;
-        private readonly IJwtService _jwtService;
-        private readonly IEmailService _emailService;
-        private readonly ILogger<SignUpCommandHandler> _logger;
+        private readonly WebApplicationFactory<Program> _factory;
+        private readonly IServiceScope _scope;
+        private readonly AuthDbContext _dbContext;
 
-        public SignUpCommandHandler(
-            IUserRepository userRepository,
-            IPasswordHashService passwordHashService,
-            IJwtService jwtService,
-            IEmailService emailService,
-            ILogger<SignUpCommandHandler> logger)
+        public AuthServiceE2ETests(WebApplicationFactory<Program> factory)
         {
-            _userRepository = userRepository ?? throw new ArgumentNullException(nameof(userRepository));
-            _passwordHashService = passwordHashService ?? throw new ArgumentNullException(nameof(passwordHashService));
-            _jwtService = jwtService ?? throw new ArgumentNullException(nameof(jwtService));
-            _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
-            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+            _factory = factory.WithWebHostBuilder(builder =>
+            {
+                builder.ConfigureAppConfiguration((context, config) =>
+                {
+                    config.AddInMemoryCollection(new Dictionary<string, string>
+                    {
+                        {"AzureAppConfigConnectionString", "Endpoint=https://dummy.azconfig.io;Id=dummy;Secret=dummysecret"}
+                    });
+                });
+
+                builder.ConfigureServices(services =>
+                {
+                    var descriptor = services.SingleOrDefault(
+                        d => d.ServiceType == typeof(DbContextOptions<AuthDbContext>));
+
+                    if (descriptor != null)
+                    {
+                        services.Remove(descriptor);
+                    }
+
+                    services.AddDbContext<AuthDbContext>(options =>
+                    {
+                        options.UseInMemoryDatabase("InMemoryDbForTesting");
+                    });
+
+                    // Mock other services as needed
+                    // services.AddScoped<IJwtService, MockJwtService>();
+                    // services.AddScoped<IEmailService, MockEmailService>();
+                });
+            });
+
+            _scope = _factory.Services.CreateScope();
+            _dbContext = _scope.ServiceProvider.GetRequiredService<AuthDbContext>();
         }
 
-        public async Task<AuthResult> Handle(SignUpCommand request, CancellationToken cancellationToken)
+        public void Dispose()
         {
-            _logger.LogInformation("Processing sign-up request for email: {Email}", request.Email);
-
-            try
-            {
-                // Validate input
-                if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
-                {
-                    _logger.LogWarning("Sign-up attempt with empty email or password");
-                    return AuthResult.FailureResult("Email and password are required.");
-                }
-
-                if (!IsValidEmail(request.Email))
-                {
-                    _logger.LogWarning("Sign-up attempt with invalid email format: {Email}", request.Email);
-                    return AuthResult.FailureResult("Invalid email format.");
-                }
-
-                // Check if user already exists
-                var existingUser = await _userRepository.GetByEmailAsync(request.Email);
-                if (existingUser != null)
-                {
-                    _logger.LogWarning("Attempted to create an account with existing email: {Email}", request.Email);
-                    return AuthResult.FailureResult("User with this email already exists.");
-                }
-
-                // Create new user
-                var newUser = new User
-                {
-                    FirstName = request.FirstName,
-                    LastName = request.LastName,
-                    Email = request.Email,
-                    DepartmentNumber = request.DepartmentNumber,
-                    PasswordHash = _passwordHashService.HashPassword(request.Password),
-                    CreatedAt = DateTime.UtcNow,
-                };
-
-                // Save user to database
-                await _userRepository.AddAsync(newUser);
-                _logger.LogInformation("New user created: {UserId}", newUser.Id);
-
-                // Generate JWT token
-                var token = _jwtService.GenerateToken(newUser);
-
-                // Send welcome email
-                try
-                {
-                    await _emailService.SendWelcomeEmailAsync(newUser.Email, newUser.FirstName);
-                    _logger.LogInformation("Welcome email sent to: {Email}", newUser.Email);
-                }
-                catch (Exception ex)
-                {
-                    // Log the error but don't fail the sign-up process
-                    _logger.LogError(ex, "Failed to send welcome email to: {Email}", newUser.Email);
-                }
-
-                return AuthResult.SuccessResult(token, newUser.Id);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "An error occurred during user sign-up for email: {Email}", request.Email);
-                return AuthResult.FailureResult("An unexpected error occurred. Please try again later.");
-            }
+            _dbContext.Database.EnsureDeleted();
+            _scope.Dispose();
         }
 
-        private bool IsValidEmail(string email)
+        [Fact]
+        public async Task FullUserJourney_RegisterAndLogin_ShouldSucceed()
         {
-            // Simple email validation regex
-            string pattern = @"^[^@\s]+@[^@\s]+\.[^@\s]+$";
-            return Regex.IsMatch(email, pattern);
+            // Arrange
+            var client = _factory.CreateClient();
+
+            var signUpCommand = new SignUpCommand
+            {
+                FirstName = "John",
+                LastName = "Doe",
+                Email = "john.doe@example.com",
+                Password = "StrongPassword123!",
+                DepartmentNumber = "D001"
+            };
+
+            // Act - Register
+            var signUpResponse = await client.PostAsJsonAsync("/api/auth/signup", signUpCommand);
+
+            // Assert - Register
+            signUpResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var signUpResult = await signUpResponse.Content.ReadFromJsonAsync<AuthResult>();
+            signUpResult.Should().NotBeNull();
+            signUpResult.Success.Should().BeTrue();
+            signUpResult.Token.Should().NotBeNullOrEmpty();
+            signUpResult.UserId.Should().NotBe(Guid.Empty);
+
+            // Act - Login
+            var loginQuery = new LoginQuery
+            {
+                Email = "john.doe@example.com",
+                Password = "StrongPassword123!"
+            };
+            var loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginQuery);
+
+            // Assert - Login
+            loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthResult>();
+            loginResult.Should().NotBeNull();
+            loginResult.Success.Should().BeTrue();
+            loginResult.Token.Should().NotBeNullOrEmpty();
+            loginResult.UserId.Should().Be(signUpResult.UserId);
+
+            // Act - Access Protected Resource
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {loginResult.Token}");
+            var protectedResponse = await client.GetAsync("/api/protected");
+
+            // Assert - Access Protected Resource
+            protectedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        }
+
+        [Fact]
+        public async Task SignUp_WithExistingEmail_ShouldFail()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var existingUser = new SignUpCommand
+            {
+                FirstName = "Existing",
+                LastName = "User",
+                Email = "existing@example.com",
+                Password = "ExistingPassword123!",
+                DepartmentNumber = "D002"
+            };
+
+            // Act - Register existing user
+            await client.PostAsJsonAsync("/api/auth/signup", existingUser);
+
+            // Act - Try to register with the same email
+            var signUpResponse = await client.PostAsJsonAsync("/api/auth/signup", existingUser);
+
+            // Assert
+            signUpResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+            var result = await signUpResponse.Content.ReadFromJsonAsync<AuthResult>();
+            result.Should().NotBeNull();
+            result.Success.Should().BeFalse();
+            result.Message.Should().Contain("already exists");
+        }
+
+        [Fact]
+        public async Task Login_WithInvalidCredentials_ShouldFail()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var loginQuery = new LoginQuery
+            {
+                Email = "nonexistent@example.com",
+                Password = "WrongPassword123!"
+            };
+
+            // Act
+            var loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginQuery);
+
+            // Assert
+            loginResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+            var result = await loginResponse.Content.ReadFromJsonAsync<AuthResult>();
+            result.Should().NotBeNull();
+            result.Success.Should().BeFalse();
+            result.Message.Should().Contain("Invalid");
+        }
+
+        [Fact]
+        public async Task AccessProtectedResource_WithoutToken_ShouldFail()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+
+            // Act
+            var protectedResponse = await client.GetAsync("/api/protected");
+
+            // Assert
+            protectedResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
     }
 }
