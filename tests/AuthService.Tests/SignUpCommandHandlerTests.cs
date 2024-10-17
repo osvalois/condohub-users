@@ -7,8 +7,10 @@ using AuthService.Application.Auth.Queries;
 using AuthService.Domain.Entities;
 using AuthService.Domain.Interfaces;
 using AuthService.Infrastructure.Services;
+using Microsoft.Extensions.Configuration;
 using Moq;
 using Xunit;
+using AuthService.Application;
 
 namespace AuthService.Tests
 {

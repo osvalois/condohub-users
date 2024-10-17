@@ -11,6 +11,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using AuthService.Infrastructure.Persistence;
+using AuthService.Application;
+
 
 namespace AuthService.Tests.E2E
 {
