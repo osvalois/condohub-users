@@ -85,8 +85,8 @@ namespace AuthService.Infrastructure.Services
                 var senderEmail = _configuration["EmailSettings:SenderEmail"];
                 var senderName = _configuration["EmailSettings:SenderName"];
 
-                if (string.IsNullOrEmpty(smtpServer) || string.IsNullOrEmpty(smtpPortString) || 
-                    string.IsNullOrEmpty(smtpUsername) || string.IsNullOrEmpty(smtpPassword) || 
+                if (string.IsNullOrEmpty(smtpServer) || string.IsNullOrEmpty(smtpPortString) ||
+                    string.IsNullOrEmpty(smtpUsername) || string.IsNullOrEmpty(smtpPassword) ||
                     string.IsNullOrEmpty(senderEmail) || string.IsNullOrEmpty(senderName))
                 {
                     throw new InvalidOperationException("Email settings are not properly configured.");
