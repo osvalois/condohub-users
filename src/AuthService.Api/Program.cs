@@ -18,7 +18,7 @@ using System.Reflection;
 
 namespace AuthService.Api
 {
-    public static class Program
+    public class Program
     {
         private static readonly string[] EmptyStringArray = Array.Empty<string>();
 
@@ -47,7 +47,7 @@ namespace AuthService.Api
             }
         }
 
-        private static void ConfigureServices(WebApplicationBuilder builder)
+        public static void ConfigureServices(WebApplicationBuilder builder)
         {
             // Configure Serilog
             Log.Logger = new LoggerConfiguration()
@@ -96,7 +96,7 @@ namespace AuthService.Api
             });
         }
 
-        private static void ConfigureApp(WebApplication app)
+        public static void ConfigureApp(WebApplication app)
         {
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())

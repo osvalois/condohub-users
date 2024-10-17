@@ -1,91 +1,182 @@
 using System;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Threading.Tasks;
 using AuthService.Api;
 using AuthService.Application.Auth.Commands;
 using AuthService.Application.Auth.Queries;
-using AuthService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using FluentAssertions;
 
-namespace AuthService.Tests.E2E
+namespace AuthService.Tests
 {
-    public class AuthServiceE2ETests : IClassFixture<WebApplicationFactory<Program>>, IDisposable
+    public class AuthServiceE2ETests : IClassFixture<WebApplicationFactory<Program>>
     {
         private readonly WebApplicationFactory<Program> _factory;
-        private readonly IServiceScope _scope;
-        private readonly AuthDbContext _dbContext;
 
         public AuthServiceE2ETests(WebApplicationFactory<Program> factory)
         {
-            _factory = factory.WithWebHostBuilder(builder =>
+            _factory = factory;
+        }
+
+        [Fact]
+        public async Task Login_WithValidCredentials_ReturnsOk()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var query = new LoginQuery
             {
-                builder.ConfigureServices(services =>
-                {
-                    var descriptor = services.SingleOrDefault(
-                        d => d.ServiceType == typeof(DbContextOptions<AuthDbContext>));
+                Email = "test@example.com",
+                Password = "Password123!"
+            };
 
-                    if (descriptor != null)
-                    {
-                        services.Remove(descriptor);
-                    }
+            // Act
+            var response = await client.PostAsJsonAsync("/api/auth/token", query);
 
-                    services.AddDbContext<AuthDbContext>(options =>
-                    {
-                        options.UseInMemoryDatabase("InMemoryDbForTesting");
-                    });
-                });
-            });
-
-            _scope = _factory.Services.CreateScope();
-            _dbContext = _scope.ServiceProvider.GetRequiredService<AuthDbContext>();
-        }
-
-        public void Dispose()
-        {
-            _dbContext.Database.EnsureDeleted();
-            _scope.Dispose();
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var content = await response.Content.ReadFromJsonAsync<LoginResult>();
+            Assert.NotNull(content);
+            Assert.NotNull(content.Token);
+            Assert.NotEqual(Guid.Empty, content.UserId);
         }
 
         [Fact]
-        public async Task FullUserJourney_RegisterAndLogin_ShouldSucceed()
+        public async Task Login_WithInvalidCredentials_ReturnsUnauthorized()
         {
-            // This test will always pass
-            Assert.True(true);
+            // Arrange
+            var client = _factory.CreateClient();
+            var query = new LoginQuery
+            {
+                Email = "nonexistent@example.com",
+                Password = "WrongPassword123!"
+            };
+
+            // Act
+            var response = await client.PostAsJsonAsync("/api/auth/token", query);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
         [Fact]
-        public async Task SignUp_WithExistingEmail_ShouldFail()
+        public async Task Logout_WithValidToken_ReturnsOk()
         {
-            // This test will always pass
-            Assert.True(true);
+            // Arrange
+            var client = _factory.CreateClient();
+            var loginQuery = new LoginQuery
+            {
+                Email = "test@example.com",
+                Password = "Password123!"
+            };
+            var loginResponse = await client.PostAsJsonAsync("/api/auth/token", loginQuery);
+            var loginResult = await loginResponse.Content.ReadFromJsonAsync<LoginResult>();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", loginResult.Token);
+
+            // Act
+            var response = await client.PostAsync("/api/auth/logout", null);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var content = await response.Content.ReadFromJsonAsync<object>();
+            Assert.Equal("Logout successful", content.GetType().GetProperty("message").GetValue(content, null));
         }
 
         [Fact]
-        public async Task Login_WithInvalidCredentials_ShouldFail()
+        public async Task Logout_WithoutToken_ReturnsUnauthorized()
         {
-            // This test will always pass
-            Assert.True(true);
+            // Arrange
+            var client = _factory.CreateClient();
+
+            // Act
+            var response = await client.PostAsync("/api/auth/logout", null);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
         }
 
         [Fact]
-        public async Task AccessProtectedResource_WithoutToken_ShouldFail()
+        public async Task SignUp_WithValidData_ReturnsOk()
         {
-            // This test will always pass
-            Assert.True(true);
-        }
-    }
+            // Arrange
+            var client = _factory.CreateClient();
+            var command = new SignUpCommand
+            {
+                Email = "newuser@example.com",
+                Password = "NewPassword123!",
+                FirstName = "John",
+                LastName = "Doe"
+            };
 
-    public class AuthResult
-    {
-        public bool Success { get; set; }
-        public string Token { get; set; }
-        public Guid UserId { get; set; }
-        public string Message { get; set; }
+            // Act
+            var response = await client.PostAsJsonAsync("/api/auth/signup", command);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var content = await response.Content.ReadFromJsonAsync<SignUpResult>();
+            Assert.NotNull(content);
+            Assert.NotNull(content.Token);
+            Assert.NotEqual(Guid.Empty, content.UserId);
+        }
+
+        [Fact]
+        public async Task SignUp_WithInvalidData_ReturnsBadRequest()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var command = new SignUpCommand
+            {
+                Email = "invalid-email",
+                Password = "weak",
+                FirstName = "",
+                LastName = ""
+            };
+
+            // Act
+            var response = await client.PostAsJsonAsync("/api/auth/signup", command);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task RecoverPassword_WithValidEmail_ReturnsOk()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var command = new RecoverPasswordCommand
+            {
+                Email = "test@example.com"
+            };
+
+            // Act
+            var response = await client.PostAsJsonAsync("/api/auth/recover", command);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var content = await response.Content.ReadFromJsonAsync<object>();
+            Assert.Equal("If the email exists, a password recovery link has been sent.", content.GetType().GetProperty("message").GetValue(content, null));
+        }
+
+        [Fact]
+        public async Task RecoverPassword_WithInvalidEmail_ReturnsOk()
+        {
+            // Arrange
+            var client = _factory.CreateClient();
+            var command = new RecoverPasswordCommand
+            {
+                Email = "nonexistent@example.com"
+            };
+
+            // Act
+            var response = await client.PostAsJsonAsync("/api/auth/recover", command);
+
+            // Assert
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            var content = await response.Content.ReadFromJsonAsync<object>();
+            Assert.Equal("If the email exists, a password recovery link has been sent.", content.GetType().GetProperty("message").GetValue(content, null));
+        }
     }
 }
