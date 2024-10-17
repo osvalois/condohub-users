@@ -68,7 +68,6 @@ namespace AuthService.Application.Auth.Handlers
                     DepartmentNumber = request.DepartmentNumber,
                     PasswordHash = _passwordHashService.HashPassword(request.Password),
                     CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
                 };
 
                 // Save user to database
