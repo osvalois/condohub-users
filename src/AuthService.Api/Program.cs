@@ -18,8 +18,10 @@ using System.Reflection;
 
 namespace AuthService.Api
 {
-    public class Program
+    public static class Program
     {
+        private static readonly string[] EmptyStringArray = Array.Empty<string>();
+
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
@@ -102,7 +104,7 @@ namespace AuthService.Api
                 app.UseSwagger();
                 app.UseSwaggerUI(c =>
                 {
-                    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Auth Service API v1");
+                    c.SwaggerEndpoint("./swagger/v1/swagger.json", "Auth Service API v1");
                     c.RoutePrefix = string.Empty; // To serve the Swagger UI at the app's root
                 });
             }
@@ -209,7 +211,7 @@ namespace AuthService.Api
                                 Id = "Bearer"
                             }
                         },
-                        new string[] {}
+                        EmptyStringArray
                     }
                 });
             });
