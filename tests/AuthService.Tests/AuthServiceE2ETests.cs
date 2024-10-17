@@ -10,8 +10,8 @@ using AuthService.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using Xunit;
+using FluentAssertions;
 
 namespace AuthService.Tests.E2E
 {
@@ -27,7 +27,6 @@ namespace AuthService.Tests.E2E
             {
                 builder.ConfigureServices(services =>
                 {
-                    // Remove the app's ApplicationDbContext registration.
                     var descriptor = services.SingleOrDefault(
                         d => d.ServiceType == typeof(DbContextOptions<AuthDbContext>));
 
@@ -36,20 +35,10 @@ namespace AuthService.Tests.E2E
                         services.Remove(descriptor);
                     }
 
-                    // Add ApplicationDbContext using an in-memory database for testing.
                     services.AddDbContext<AuthDbContext>(options =>
                     {
                         options.UseInMemoryDatabase("InMemoryDbForTesting");
                     });
-
-                    // Ensure all other necessary services are registered
-                    // This might include your handlers, repositories, etc.
-                    // services.AddScoped<IUserRepository, UserRepository>();
-                    // services.AddScoped<IJwtService, JwtService>();
-                    // ... other services
-
-                    // Replace other services with test doubles if necessary
-                    // services.AddSingleton<IEmailService, FakeEmailService>();
                 });
             });
 
@@ -82,12 +71,12 @@ namespace AuthService.Tests.E2E
             var signUpResponse = await client.PostAsJsonAsync("/api/auth/signup", signUpCommand);
 
             // Assert - Register
-            Assert.Equal(HttpStatusCode.OK, signUpResponse.StatusCode);
+            signUpResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             var signUpResult = await signUpResponse.Content.ReadFromJsonAsync<AuthResult>();
-            Assert.NotNull(signUpResult);
-            Assert.True(signUpResult.Success);
-            Assert.NotNull(signUpResult.Token);
-            Assert.NotEqual(Guid.Empty, signUpResult.UserId);
+            signUpResult.Should().NotBeNull();
+            signUpResult.Success.Should().BeTrue();
+            signUpResult.Token.Should().NotBeNullOrEmpty();
+            signUpResult.UserId.Should().NotBe(Guid.Empty);
 
             // Act - Login
             var loginQuery = new LoginQuery
@@ -98,19 +87,19 @@ namespace AuthService.Tests.E2E
             var loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginQuery);
 
             // Assert - Login
-            Assert.Equal(HttpStatusCode.OK, loginResponse.StatusCode);
+            loginResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             var loginResult = await loginResponse.Content.ReadFromJsonAsync<AuthResult>();
-            Assert.NotNull(loginResult);
-            Assert.True(loginResult.Success);
-            Assert.NotNull(loginResult.Token);
-            Assert.Equal(signUpResult.UserId, loginResult.UserId);
+            loginResult.Should().NotBeNull();
+            loginResult.Success.Should().BeTrue();
+            loginResult.Token.Should().NotBeNullOrEmpty();
+            loginResult.UserId.Should().Be(signUpResult.UserId);
 
             // Act - Access Protected Resource
             client.DefaultRequestHeaders.Add("Authorization", $"Bearer {loginResult.Token}");
             var protectedResponse = await client.GetAsync("/api/protected");
 
             // Assert - Access Protected Resource
-            Assert.Equal(HttpStatusCode.OK, protectedResponse.StatusCode);
+            protectedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         }
 
         [Fact]
@@ -134,11 +123,11 @@ namespace AuthService.Tests.E2E
             var signUpResponse = await client.PostAsJsonAsync("/api/auth/signup", existingUser);
 
             // Assert
-            Assert.Equal(HttpStatusCode.BadRequest, signUpResponse.StatusCode);
+            signUpResponse.StatusCode.Should().Be(HttpStatusCode.BadRequest);
             var result = await signUpResponse.Content.ReadFromJsonAsync<AuthResult>();
-            Assert.NotNull(result);
-            Assert.False(result.Success);
-            Assert.Contains("already exists", result.Message);
+            result.Should().NotBeNull();
+            result.Success.Should().BeFalse();
+            result.Message.Should().Contain("already exists");
         }
 
         [Fact]
@@ -156,11 +145,11 @@ namespace AuthService.Tests.E2E
             var loginResponse = await client.PostAsJsonAsync("/api/auth/login", loginQuery);
 
             // Assert
-            Assert.Equal(HttpStatusCode.Unauthorized, loginResponse.StatusCode);
+            loginResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
             var result = await loginResponse.Content.ReadFromJsonAsync<AuthResult>();
-            Assert.NotNull(result);
-            Assert.False(result.Success);
-            Assert.Contains("Invalid", result.Message);
+            result.Should().NotBeNull();
+            result.Success.Should().BeFalse();
+            result.Message.Should().Contain("Invalid");
         }
 
         [Fact]
@@ -173,7 +162,7 @@ namespace AuthService.Tests.E2E
             var protectedResponse = await client.GetAsync("/api/protected");
 
             // Assert
-            Assert.Equal(HttpStatusCode.Unauthorized, protectedResponse.StatusCode);
+            protectedResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }
     }
 
